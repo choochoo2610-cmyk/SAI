@@ -3,201 +3,47 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NeuroSync 3D Hypnosis</title>
-<link rel="manifest" href="manifest.json">
-<style>
-body{
- margin:0;
- background:#000;
- color:#00ffff;
- font-family:sans-serif;
- text-align:center;
- overflow:hidden;
-}
-canvas{position:fixed;top:0;left:0;}
-#ui{
- position:fixed;
- bottom:20px;
- left:50%;
- transform:translateX(-50%);
- background:rgba(0,0,0,0.7);
- padding:20px;
- border-radius:15px;
-}
-button,input{
- margin:5px;
- padding:8px;
- border-radius:8px;
- border:none;
-}
-</style>
+<title>SAI Extreme Audio Engine</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<canvas id="gl"></canvas>
+<h1>SAI ∞ Extreme Audio</h1>
 
-<div id="ui">
-<h2>NeuroSync 3D</h2>
-<label>周波数差 Hz</label>
-<input type="range" id="freqDiff" min="1" max="15" value="6">
-<br>
-<button onclick="startSession()">開始</button>
-<button onclick="stopSession()">停止</button>
-<button onclick="analyzeSession()">解析</button>
-<p id="status"></p>
-<p id="analysis"></p>
+<div class="panel">
+
+<button id="startBtn">START</button>
+<button id="stopBtn">STOP</button>
+
+<h3>Brainwave Preset</h3>
+<select id="preset">
+<option value="2">Δ Delta (2Hz)</option>
+<option value="6">θ Theta (6Hz)</option>
+<option value="10" selected>α Alpha (10Hz)</option>
+<option value="18">β Beta (18Hz)</option>
+</select>
+
+<h3>Waveform</h3>
+<select id="waveform">
+<option value="sine">Sine</option>
+<option value="triangle">Triangle</option>
+<option value="sawtooth">Saw</option>
+</select>
+
+<h3>Base Frequency</h3>
+<input type="range" id="baseFreq" min="100" max="400" value="200">
+
+<h3>Spatial Speed</h3>
+<input type="range" id="moveSpeed" min="0" max="5" step="0.1" value="1">
+
+<h3>Breathing Mode</h3>
+<button id="breathBtn">Toggle Breathing Sync</button>
+
+<h3>Heartbeat Sync</h3>
+<input type="range" id="bpm" min="60" max="90" value="70">
+
 </div>
 
-<script>
-/* ===== WebGL ===== */
-const canvas=document.getElementById("gl");
-const gl=canvas.getContext("webgl");
-if(!gl){ alert("WebGL未対応ブラウザ"); }
-
-function resize(){
- canvas.width=window.innerWidth;
- canvas.height=window.innerHeight;
- gl.viewport(0,0,canvas.width,canvas.height);
-}
-resize();
-window.addEventListener("resize",resize);
-
-const vs=`attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}`;
-const fs=`precision mediump float;
-uniform float t;uniform vec2 r;
-void main(){
- vec2 uv=gl_FragCoord.xy/r;
- float w=sin(t+uv.x*8.)*cos(t+uv.y*8.);
- float c=.5+.5*w;
- gl_FragColor=vec4(0.,c,1.,1.);
-}`;
-
-function shader(type,src){
- const s=gl.createShader(type);
- gl.shaderSource(s,src);
- gl.compileShader(s);
- return s;
-}
-
-const prog=gl.createProgram();
-gl.attachShader(prog,shader(gl.VERTEX_SHADER,vs));
-gl.attachShader(prog,shader(gl.FRAGMENT_SHADER,fs));
-gl.linkProgram(prog);
-gl.useProgram(prog);
-
-const buf=gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER,buf);
-gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
-
-const pos=gl.getAttribLocation(prog,"p");
-gl.enableVertexAttribArray(pos);
-gl.vertexAttribPointer(pos,2,gl.FLOAT,false,0,0);
-
-const tLoc=gl.getUniformLocation(prog,"t");
-const rLoc=gl.getUniformLocation(prog,"r");
-
-function draw(time){
- gl.uniform1f(tLoc,time*.001);
- gl.uniform2f(rLoc,canvas.width,canvas.height);
- gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
- requestAnimationFrame(draw);
-}
-requestAnimationFrame(draw);
-
-/* ===== Audio ===== */
-let audioCtx=null;
-let nodes=[];
-let startTime=0;
-
-function safePanner(ctx,pan){
- if(ctx.createStereoPanner){
-  const p=ctx.createStereoPanner();
-  p.pan.value=pan;
-  return p;
- }
- return ctx.createGain();
-}
-
-function startSession(){
- if(audioCtx) return;
-
- try{
-  audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-  const diff=parseFloat(document.getElementById("freqDiff").value);
-  const base=200;
-
-  const left=audioCtx.createOscillator();
-  const right=audioCtx.createOscillator();
-  const amb=audioCtx.createOscillator();
-
-  left.frequency.value=base;
-  right.frequency.value=base+diff;
-  amb.frequency.value=40;
-
-  const lg=audioCtx.createGain();
-  const rg=audioCtx.createGain();
-  const ag=audioCtx.createGain();
-
-  lg.gain.value=0.15;
-  rg.gain.value=0.15;
-  ag.gain.value=0.05;
-
-  left.connect(lg).connect(safePanner(audioCtx,-1)).connect(audioCtx.destination);
-  right.connect(rg).connect(safePanner(audioCtx,1)).connect(audioCtx.destination);
-  amb.connect(ag).connect(audioCtx.destination);
-
-  left.start();
-  right.start();
-  amb.start();
-
-  nodes=[left,right,amb];
-  startTime=Date.now();
-  document.getElementById("status").innerText="セッション中...";
- }catch(e){
-  console.error(e);
- }
-}
-
-function stopSession(){
- if(!audioCtx) return;
-
- nodes.forEach(n=>{ try{n.stop();}catch(e){} });
- audioCtx.close();
- audioCtx=null;
-
- const duration=(Date.now()-startTime)/1000;
- const diff=document.getElementById("freqDiff").value;
-
- let s=JSON.parse(localStorage.getItem("sessions")||"[]");
- s.push({duration:duration,diff:diff});
- localStorage.setItem("sessions",JSON.stringify(s));
-
- document.getElementById("status").innerText="停止しました";
-}
-
-function analyzeSession(){
- let s=JSON.parse(localStorage.getItem("sessions")||"[]");
- if(!s.length){
-  document.getElementById("analysis").innerText="データなし";
-  return;
- }
-
- let avgD=s.reduce((a,b)=>a+b.duration,0)/s.length;
- let avgF=s.reduce((a,b)=>a+parseFloat(b.diff),0)/s.length;
-
- let state="浅い";
- if(avgD>300) state="深いトランス";
- if(avgF<=4) state="α優位";
-
- document.getElementById("analysis").innerText=
- "平均時間:"+avgD.toFixed(1)+"秒 / 平均差:"+avgF.toFixed(1)+"Hz / 状態:"+state;
-}
-
-/* ===== PWA ===== */
-if("serviceWorker" in navigator){
- navigator.serviceWorker.register("service-worker.js").catch(()=>{});
-}
-</script>
-
+<script src="audioEngine.js"></script>
 </body>
 </html>
