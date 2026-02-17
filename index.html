@@ -3,181 +3,48 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Deep Relax Engine v2 + Phase Control</title>
-<style>
-body{
-  background:#000;
-  color:#0ff;
-  font-family:monospace;
-  text-align:center;
-  padding-top:40px;
-}
-button{
-  padding:15px 30px;
-  margin:10px;
-  font-size:18px;
-  background:#111;
-  color:#0ff;
-  border:1px solid #0ff;
-}
-input{
-  width:250px;
-}
-</style>
+<title>SAI - Deep Relax Engine</title>
+<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.json">
 </head>
 <body>
 
-<h1>Deep Relax Engine</h1>
+<h1>SAI Deep Relax</h1>
 
-<label>ベース周波数: <span id="baseVal">200</span>Hz</label><br>
-<input type="range" id="baseFreq" min="100" max="400" value="200"><br><br>
+<div class="controls">
 
-<label>ノイズ量: <span id="noiseVal">0.2</span></label><br>
-<input type="range" id="noiseAmt" min="0" max="0.5" step="0.01" value="0.2"><br><br>
+<label>Base Frequency: <span id="baseVal">200</span>Hz</label>
+<input type="range" id="baseFreq" min="100" max="400" value="200">
 
-<button onclick="startSession()">開始</button>
-<button onclick="stopSession()">停止</button>
+<label>Noise: <span id="noiseVal">0.2</span></label>
+<input type="range" id="noiseAmt" min="0" max="0.5" step="0.01" value="0.2">
+
+<br>
+<button id="startBtn">Start</button>
+<button id="stopBtn">Stop</button>
+
+</div>
+
+<script src="audioEngine.js"></script>
+<script src="analyticsEngine.js"></script>
+<script src="aiEngine.js"></script>
 
 <script>
-let audioCtx;
-let leftOsc,rightOsc,noiseSource;
-let masterGain, limiter;
-let noiseGain;
-let lfo;
-let running=false;
-let sessionTimer;
+document.getElementById("startBtn").onclick = ()=>{
+  AudioEngine.start();
+  AIEngine.startSession();
+};
 
-function updateLabels(){
-  baseVal.textContent = baseFreq.value;
-  noiseVal.textContent = noiseAmt.value;
-}
-document.querySelectorAll("input").forEach(i=>{
-  i.oninput = updateLabels;
-});
-updateLabels();
+document.getElementById("stopBtn").onclick = ()=>{
+  AudioEngine.stop();
+  AnalyticsEngine.endSession();
+};
 
-function createPinkNoise(ctx){
-  const bufferSize = 4096;
-  const node = ctx.createScriptProcessor(bufferSize,1,1);
-  let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
-  node.onaudioprocess = function(e){
-    const output = e.outputBuffer.getChannelData(0);
-    for(let i=0;i<bufferSize;i++){
-      const white = Math.random()*2-1;
-      b0=0.99886*b0+white*0.0555179;
-      b1=0.99332*b1+white*0.0750759;
-      b2=0.96900*b2+white*0.1538520;
-      b3=0.86650*b3+white*0.3104856;
-      b4=0.55000*b4+white*0.5329522;
-      b5=-0.7616*b5-white*0.0168980;
-      output[i]=b0+b1+b2+b3+b4+b5+b6+white*0.5362;
-      output[i]*=0.11;
-      b6=white*0.115926;
-    }
-  };
-  return node;
-}
+baseFreq.oninput=()=>baseVal.textContent=baseFreq.value;
+noiseAmt.oninput=()=>noiseVal.textContent=noiseAmt.value;
 
-/* ---------- フェーズ設計 ---------- */
-const phases = [
-  {duration:180, targetDiff:10},
-  {duration:300, targetDiff:8},
-  {duration:420, targetDiff:6},
-  {duration:180, targetDiff:5},
-  {duration:120, targetDiff:9}
-];
-
-function startPhaseControl(){
-  let totalTime = 0;
-  const base = parseFloat(baseFreq.value);
-
-  phases.forEach(phase=>{
-    const endTime = audioCtx.currentTime + totalTime + phase.duration;
-    rightOsc.frequency.linearRampToValueAtTime(
-      base + phase.targetDiff,
-      endTime
-    );
-    totalTime += phase.duration;
-  });
-
-  sessionTimer = setTimeout(()=>{
-    stopSession();
-  }, totalTime*1000);
-}
-
-function startSession(){
-  if(running) return;
-  running=true;
-
-  audioCtx = new (window.AudioContext||window.webkitAudioContext)();
-
-  leftOsc = audioCtx.createOscillator();
-  rightOsc = audioCtx.createOscillator();
-  leftOsc.type="sine";
-  rightOsc.type="sine";
-
-  masterGain = audioCtx.createGain();
-  masterGain.gain.value = 0;
-
-  noiseGain = audioCtx.createGain();
-  noiseGain.gain.value = noiseAmt.value;
-
-  limiter = audioCtx.createDynamicsCompressor();
-  limiter.threshold.value = -10;
-  limiter.knee.value = 0;
-  limiter.ratio.value = 20;
-  limiter.attack.value = 0.003;
-  limiter.release.value = 0.25;
-
-  const leftPan = audioCtx.createStereoPanner();
-  const rightPan = audioCtx.createStereoPanner();
-  leftPan.pan.value=-1;
-  rightPan.pan.value=1;
-
-  noiseSource = createPinkNoise(audioCtx);
-
-  /* 1/f風ゆらぎ */
-  lfo = audioCtx.createOscillator();
-  const lfoGain = audioCtx.createGain();
-  lfo.frequency.value = 0.05;
-  lfoGain.gain.value = 3;
-  lfo.connect(lfoGain);
-  lfoGain.connect(leftOsc.frequency);
-  lfoGain.connect(rightOsc.frequency);
-
-  const base = parseFloat(baseFreq.value);
-  leftOsc.frequency.value = base;
-  rightOsc.frequency.value = base + 10;
-
-  leftOsc.connect(leftPan);
-  rightOsc.connect(rightPan);
-  leftPan.connect(masterGain);
-  rightPan.connect(masterGain);
-
-  noiseSource.connect(noiseGain);
-  noiseGain.connect(masterGain);
-
-  masterGain.connect(limiter);
-  limiter.connect(audioCtx.destination);
-
-  leftOsc.start();
-  rightOsc.start();
-  noiseSource.connect(noiseGain);
-  lfo.start();
-
-  masterGain.gain.linearRampToValueAtTime(0.4,audioCtx.currentTime+3);
-
-  startPhaseControl();
-}
-
-function stopSession(){
-  if(!running) return;
-  clearTimeout(sessionTimer);
-  masterGain.gain.linearRampToValueAtTime(0,audioCtx.currentTime+2);
-  setTimeout(()=>{
-    audioCtx.close();
-    running=false;
-  },2500);
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register("sw.js");
 }
 </script>
 
