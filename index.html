@@ -3,140 +3,248 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NeuroSync AI</title>
+<title>NeuroSync 3D Hypnosis</title>
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#000000">
 <style>
-body{margin:0;background:#000;color:#0ff;font-family:sans-serif;text-align:center;}
-canvas{display:block;}
-button,input{margin:5px;padding:6px;background:#111;color:#0ff;border:1px solid #0ff;}
-#ui{position:fixed;top:10px;left:0;right:0;z-index:10;}
+body{
+ margin:0;
+ background:#000;
+ color:#00ffff;
+ font-family:sans-serif;
+ text-align:center;
+ overflow:hidden;
+}
+canvas{
+ position:fixed;
+ top:0;
+ left:0;
+}
+#ui{
+ position:fixed;
+ bottom:20px;
+ left:50%;
+ transform:translateX(-50%);
+ background:rgba(0,0,0,0.7);
+ padding:20px;
+ border-radius:15px;
+}
+button,input{
+ margin:5px;
+ padding:8px;
+ border-radius:8px;
+ border:none;
+}
 </style>
 </head>
 <body>
 
+<canvas id="gl"></canvas>
+
 <div id="ui">
-<h2>NeuroSync AI Lv <span id="level">1</span></h2>
-<button onclick="startAll()">開始</button>
-<button onclick="stopAll()">停止</button>
-<button onclick="sync()">同期</button>
+<h2>NeuroSync 3D</h2>
+
+<label>周波数差 Hz</label>
+<input type="range" id="freqDiff" min="1" max="15" value="6">
+
 <br>
-周波数差 <input type="range" id="freq" min="1" max="40" value="10">
-<span id="fval">10</span>Hz
-<p id="aiReport"></p>
+
+<button onclick="startSession()">開始</button>
+<button onclick="stopSession()">停止</button>
+<button onclick="analyzeSession()">解析</button>
+
+<p id="status"></p>
+<p id="analysis"></p>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script>
-let scene,camera,renderer,mesh;
-let audioCtx,leftOsc,rightOsc,masterGain;
-let level=1,depth=0,isRunning=false,time=0,timer;
+/* =====================
+   WebGL
+===================== */
+const canvas=document.getElementById("gl");
+const gl=canvas.getContext("webgl");
+function resize(){
+ canvas.width=window.innerWidth;
+ canvas.height=window.innerHeight;
+ gl.viewport(0,0,canvas.width,canvas.height);
+}
+resize();
+window.addEventListener("resize",resize);
 
-initGL();
-registerSW();
+const vsSource=`
+attribute vec2 pos;
+void main(){
+ gl_Position=vec4(pos,0.0,1.0);
+}
+`;
 
-function initGL(){
- scene=new THREE.Scene();
- camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,1000);
- renderer=new THREE.WebGLRenderer();
- renderer.setSize(window.innerWidth,window.innerHeight);
- document.body.appendChild(renderer.domElement);
+const fsSource=`
+precision mediump float;
+uniform float time;
+uniform vec2 resolution;
+void main(){
+ vec2 uv=gl_FragCoord.xy/resolution;
+ float wave=sin(time+uv.x*10.0)*cos(time+uv.y*10.0);
+ float color=0.5+0.5*wave;
+ gl_FragColor=vec4(0.0,color,1.0,1.0);
+}
+`;
 
- const geo=new THREE.IcosahedronGeometry(2,4);
- const mat=new THREE.MeshBasicMaterial({wireframe:true,color:0x00ffff});
- mesh=new THREE.Mesh(geo,mat);
- scene.add(mesh);
- camera.position.z=5;
- animate();
+function shader(type,src){
+ const s=gl.createShader(type);
+ gl.shaderSource(s,src);
+ gl.compileShader(s);
+ return s;
 }
 
-function animate(){
- requestAnimationFrame(animate);
- if(mesh) mesh.rotation.x+=0.003;
- if(mesh) mesh.rotation.y+=0.005;
- renderer.render(scene,camera);
+const program=gl.createProgram();
+gl.attachShader(program,shader(gl.VERTEX_SHADER,vsSource));
+gl.attachShader(program,shader(gl.FRAGMENT_SHADER,fsSource));
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const vertices=new Float32Array([-1,-1,1,-1,-1,1,1,1]);
+const buffer=gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
+gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STATIC_DRAW);
+
+const loc=gl.getAttribLocation(program,"pos");
+gl.enableVertexAttribArray(loc);
+gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+
+const timeLoc=gl.getUniformLocation(program,"time");
+const resLoc=gl.getUniformLocation(program,"resolution");
+
+function render(t){
+ gl.uniform1f(timeLoc,t*0.001);
+ gl.uniform2f(resLoc,canvas.width,canvas.height);
+ gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+ requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+/* =====================
+   Audio System
+===================== */
+let audioCtx;
+let oscillators=[];
+let noiseSource;
+let startTime;
+
+function createPinkNoise(ctx){
+ const bufferSize=4096;
+ const node=ctx.createScriptProcessor(bufferSize,1,1);
+ let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+ node.onaudioprocess=function(e){
+  const output=e.outputBuffer.getChannelData(0);
+  for(let i=0;i<bufferSize;i++){
+   const white=Math.random()*2-1;
+   b0=0.99886*b0+white*0.0555179;
+   b1=0.99332*b1+white*0.0750759;
+   b2=0.96900*b2+white*0.1538520;
+   b3=0.86650*b3+white*0.3104856;
+   b4=0.55000*b4+white*0.5329522;
+   b5=-0.7616*b5-white*0.0168980;
+   output[i]=b0+b1+b2+b3+b4+b5+b6+white*0.5362;
+   output[i]*=0.11;
+   b6=white*0.115926;
+  }
+ };
+ return node;
 }
 
-function safeCtx(){
- if(!audioCtx){
-  const AC=window.AudioContext||window.webkitAudioContext;
-  if(!AC) return null;
-  audioCtx=new AC();
- }
- return audioCtx;
-}
-
-function startAll(){
- if(isRunning) return;
- const ctx=safeCtx();
- if(!ctx) return;
- masterGain=ctx.createGain();
- masterGain.gain.value=0.3;
- masterGain.connect(ctx.destination);
-
- leftOsc=ctx.createOscillator();
- rightOsc=ctx.createOscillator();
- leftOsc.frequency.value=220;
- rightOsc.frequency.value=220+parseFloat(freq.value);
-
- const merger=ctx.createChannelMerger(2);
- leftOsc.connect(merger,0,0);
- rightOsc.connect(merger,0,1);
- merger.connect(masterGain);
-
- leftOsc.start();rightOsc.start();
- isRunning=true;
- timer=setInterval(()=>time++,1000);
-}
-
-function stopAll(){
- if(!isRunning) return;
+function startSession(){
  try{
-  leftOsc.stop();rightOsc.stop();
-  masterGain.disconnect();
- }catch(e){}
- clearInterval(timer);
- analyzeSession();
- isRunning=false;
+ audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+ const diff=parseFloat(document.getElementById("freqDiff").value);
+
+ const baseFreq=200;
+
+ const left=audioCtx.createOscillator();
+ const right=audioCtx.createOscillator();
+ const ambience=audioCtx.createOscillator();
+
+ const leftGain=audioCtx.createGain();
+ const rightGain=audioCtx.createGain();
+ const ambGain=audioCtx.createGain();
+
+ const leftPan=audioCtx.createStereoPanner();
+ const rightPan=audioCtx.createStereoPanner();
+
+ left.frequency.value=baseFreq;
+ right.frequency.value=baseFreq+diff;
+ ambience.frequency.value=40;
+
+ leftPan.pan.value=-1;
+ rightPan.pan.value=1;
+
+ leftGain.gain.setValueAtTime(0,audioCtx.currentTime);
+ rightGain.gain.setValueAtTime(0,audioCtx.currentTime);
+ ambGain.gain.setValueAtTime(0,audioCtx.currentTime);
+
+ leftGain.gain.linearRampToValueAtTime(0.15,audioCtx.currentTime+3);
+ rightGain.gain.linearRampToValueAtTime(0.15,audioCtx.currentTime+3);
+ ambGain.gain.linearRampToValueAtTime(0.05,audioCtx.currentTime+3);
+
+ left.connect(leftGain).connect(leftPan).connect(audioCtx.destination);
+ right.connect(rightGain).connect(rightPan).connect(audioCtx.destination);
+ ambience.connect(ambGain).connect(audioCtx.destination);
+
+ left.start();
+ right.start();
+ ambience.start();
+
+ noiseSource=createPinkNoise(audioCtx);
+ const noiseGain=audioCtx.createGain();
+ noiseGain.gain.value=0.02;
+ noiseSource.connect(noiseGain).connect(audioCtx.destination);
+
+ oscillators=[left,right,ambience];
+ startTime=Date.now();
+ document.getElementById("status").innerText="セッション中...";
+ }catch(e){
+  console.error(e);
+ }
 }
 
-freq.oninput=()=>{
- fval.innerText=freq.value;
- if(rightOsc) rightOsc.frequency.value=220+parseFloat(freq.value);
-}
+function stopSession(){
+ if(audioCtx){
+  oscillators.forEach(o=>o.stop());
+  audioCtx.close();
+  const duration=(Date.now()-startTime)/1000;
+  const diff=document.getElementById("freqDiff").value;
 
-function sync(){
- depth+=10;
- if(depth>=100){level++;depth=0;levelEl.innerText=level;}
+  let sessions=JSON.parse(localStorage.getItem("sessions")||"[]");
+  sessions.push({duration:duration,diff:diff});
+  localStorage.setItem("sessions",JSON.stringify(sessions));
+ }
+ document.getElementById("status").innerText="停止しました";
 }
 
 function analyzeSession(){
- let score=Math.min(100,(level*10)+(time/5));
- let suggestion="Relax";
- if(score>60) suggestion="Focus";
- if(score>80) suggestion="Deep Focus";
- aiReport.innerText="集中スコア: "+score.toFixed(1)+" → 推奨: "+suggestion;
- save(score);
-}
-
-function save(score){
- try{
-  const d=JSON.parse(localStorage.getItem("nsData")||"[]");
-  d.push({score,date:Date.now()});
-  localStorage.setItem("nsData",JSON.stringify(d));
- }catch(e){}
-}
-
-function registerSW(){
- if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('service-worker.js');
+ let sessions=JSON.parse(localStorage.getItem("sessions")||"[]");
+ if(sessions.length===0){
+  document.getElementById("analysis").innerText="データなし";
+  return;
  }
+
+ let avgDuration=sessions.reduce((a,b)=>a+b.duration,0)/sessions.length;
+ let avgDiff=sessions.reduce((a,b)=>a+parseFloat(b.diff),0)/sessions.length;
+
+ let state="浅いリラックス";
+ if(avgDuration>300) state="深いトランス";
+ if(avgDiff<=4) state="α優位";
+
+ document.getElementById("analysis").innerText=
+ "平均時間:"+avgDuration.toFixed(1)+"秒 / 平均差:"+avgDiff.toFixed(1)+"Hz / 状態:"+state;
 }
 
-const levelEl=document.getElementById("level");
-const freq=document.getElementById("freq");
-const fval=document.getElementById("fval");
-const aiReport=document.getElementById("aiReport");
+/* =====================
+   PWA
+===================== */
+if("serviceWorker" in navigator){
+ navigator.serviceWorker.register("service-worker.js");
+}
 </script>
+
 </body>
 </html>
