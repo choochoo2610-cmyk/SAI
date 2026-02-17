@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NeuroSync AI</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#000000">
+<style>
+body{margin:0;background:#000;color:#0ff;font-family:sans-serif;text-align:center;}
+canvas{display:block;}
+button,input{margin:5px;padding:6px;background:#111;color:#0ff;border:1px solid #0ff;}
+#ui{position:fixed;top:10px;left:0;right:0;z-index:10;}
+</style>
+</head>
+<body>
+
+<div id="ui">
+<h2>NeuroSync AI Lv <span id="level">1</span></h2>
+<button onclick="startAll()">開始</button>
+<button onclick="stopAll()">停止</button>
+<button onclick="sync()">同期</button>
+<br>
+周波数差 <input type="range" id="freq" min="1" max="40" value="10">
+<span id="fval">10</span>Hz
+<p id="aiReport"></p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+let scene,camera,renderer,mesh;
+let audioCtx,leftOsc,rightOsc,masterGain;
+let level=1,depth=0,isRunning=false,time=0,timer;
+
+initGL();
+registerSW();
+
+function initGL(){
+ scene=new THREE.Scene();
+ camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,1000);
+ renderer=new THREE.WebGLRenderer();
+ renderer.setSize(window.innerWidth,window.innerHeight);
+ document.body.appendChild(renderer.domElement);
+
+ const geo=new THREE.IcosahedronGeometry(2,4);
+ const mat=new THREE.MeshBasicMaterial({wireframe:true,color:0x00ffff});
+ mesh=new THREE.Mesh(geo,mat);
+ scene.add(mesh);
+ camera.position.z=5;
+ animate();
+}
+
+function animate(){
+ requestAnimationFrame(animate);
+ if(mesh) mesh.rotation.x+=0.003;
+ if(mesh) mesh.rotation.y+=0.005;
+ renderer.render(scene,camera);
+}
+
+function safeCtx(){
+ if(!audioCtx){
+  const AC=window.AudioContext||window.webkitAudioContext;
+  if(!AC) return null;
+  audioCtx=new AC();
+ }
+ return audioCtx;
+}
+
+function startAll(){
+ if(isRunning) return;
+ const ctx=safeCtx();
+ if(!ctx) return;
+ masterGain=ctx.createGain();
+ masterGain.gain.value=0.3;
+ masterGain.connect(ctx.destination);
+
+ leftOsc=ctx.createOscillator();
+ rightOsc=ctx.createOscillator();
+ leftOsc.frequency.value=220;
+ rightOsc.frequency.value=220+parseFloat(freq.value);
+
+ const merger=ctx.createChannelMerger(2);
+ leftOsc.connect(merger,0,0);
+ rightOsc.connect(merger,0,1);
+ merger.connect(masterGain);
+
+ leftOsc.start();rightOsc.start();
+ isRunning=true;
+ timer=setInterval(()=>time++,1000);
+}
+
+function stopAll(){
+ if(!isRunning) return;
+ try{
+  leftOsc.stop();rightOsc.stop();
+  masterGain.disconnect();
+ }catch(e){}
+ clearInterval(timer);
+ analyzeSession();
+ isRunning=false;
+}
+
+freq.oninput=()=>{
+ fval.innerText=freq.value;
+ if(rightOsc) rightOsc.frequency.value=220+parseFloat(freq.value);
+}
+
+function sync(){
+ depth+=10;
+ if(depth>=100){level++;depth=0;levelEl.innerText=level;}
+}
+
+function analyzeSession(){
+ let score=Math.min(100,(level*10)+(time/5));
+ let suggestion="Relax";
+ if(score>60) suggestion="Focus";
+ if(score>80) suggestion="Deep Focus";
+ aiReport.innerText="集中スコア: "+score.toFixed(1)+" → 推奨: "+suggestion;
+ save(score);
+}
+
+function save(score){
+ try{
+  const d=JSON.parse(localStorage.getItem("nsData")||"[]");
+  d.push({score,date:Date.now()});
+  localStorage.setItem("nsData",JSON.stringify(d));
+ }catch(e){}
+}
+
+function registerSW(){
+ if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('service-worker.js');
+ }
+}
+
+const levelEl=document.getElementById("level");
+const freq=document.getElementById("freq");
+const fval=document.getElementById("fval");
+const aiReport=document.getElementById("aiReport");
+</script>
+</body>
+</html>
