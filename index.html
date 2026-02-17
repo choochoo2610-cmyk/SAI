@@ -49,9 +49,10 @@ button,input{
 </div>
 
 <script>
-/* ================= WebGL ================= */
+/* ===== WebGL ===== */
 const canvas=document.getElementById("gl");
 const gl=canvas.getContext("webgl");
+if(!gl){ alert("WebGL未対応ブラウザ"); }
 
 function resize(){
  canvas.width=window.innerWidth;
@@ -71,7 +72,7 @@ void main(){
  gl_FragColor=vec4(0.,c,1.,1.);
 }`;
 
-function sh(type,src){
+function shader(type,src){
  const s=gl.createShader(type);
  gl.shaderSource(s,src);
  gl.compileShader(s);
@@ -79,8 +80,8 @@ function sh(type,src){
 }
 
 const prog=gl.createProgram();
-gl.attachShader(prog,sh(gl.VERTEX_SHADER,vs));
-gl.attachShader(prog,sh(gl.FRAGMENT_SHADER,fs));
+gl.attachShader(prog,shader(gl.VERTEX_SHADER,vs));
+gl.attachShader(prog,shader(gl.FRAGMENT_SHADER,fs));
 gl.linkProgram(prog);
 gl.useProgram(prog);
 
@@ -103,30 +104,18 @@ function draw(time){
 }
 requestAnimationFrame(draw);
 
-/* ================= Audio ================= */
+/* ===== Audio ===== */
 let audioCtx=null;
 let nodes=[];
 let startTime=0;
 
-function createPinkNoise(ctx){
- const bufferSize=4096;
- const node=ctx.createScriptProcessor(bufferSize,1,1);
- node.onaudioprocess=e=>{
-  const out=e.outputBuffer.getChannelData(0);
-  for(let i=0;i<bufferSize;i++){
-   out[i]=(Math.random()*2-1)*0.1;
-  }
- };
- return node;
-}
-
-function safePanner(ctx,panValue){
+function safePanner(ctx,pan){
  if(ctx.createStereoPanner){
   const p=ctx.createStereoPanner();
-  p.pan.value=panValue;
+  p.pan.value=pan;
   return p;
  }
- return ctx.createGain(); // fallback
+ return ctx.createGain();
 }
 
 function startSession(){
@@ -141,13 +130,13 @@ function startSession(){
   const right=audioCtx.createOscillator();
   const amb=audioCtx.createOscillator();
 
-  const lg=audioCtx.createGain();
-  const rg=audioCtx.createGain();
-  const ag=audioCtx.createGain();
-
   left.frequency.value=base;
   right.frequency.value=base+diff;
   amb.frequency.value=40;
+
+  const lg=audioCtx.createGain();
+  const rg=audioCtx.createGain();
+  const ag=audioCtx.createGain();
 
   lg.gain.value=0.15;
   rg.gain.value=0.15;
@@ -157,14 +146,11 @@ function startSession(){
   right.connect(rg).connect(safePanner(audioCtx,1)).connect(audioCtx.destination);
   amb.connect(ag).connect(audioCtx.destination);
 
-  const noise=createPinkNoise(audioCtx);
-  const ng=audioCtx.createGain();
-  ng.gain.value=0.02;
-  noise.connect(ng).connect(audioCtx.destination);
+  left.start();
+  right.start();
+  amb.start();
 
-  left.start(); right.start(); amb.start();
-
-  nodes=[left,right,amb,noise];
+  nodes=[left,right,amb];
   startTime=Date.now();
   document.getElementById("status").innerText="セッション中...";
  }catch(e){
@@ -175,10 +161,7 @@ function startSession(){
 function stopSession(){
  if(!audioCtx) return;
 
- nodes.forEach(n=>{
-  try{ if(n.stop) n.stop(); }catch(e){}
- });
-
+ nodes.forEach(n=>{ try{n.stop();}catch(e){} });
  audioCtx.close();
  audioCtx=null;
 
@@ -210,7 +193,7 @@ function analyzeSession(){
  "平均時間:"+avgD.toFixed(1)+"秒 / 平均差:"+avgF.toFixed(1)+"Hz / 状態:"+state;
 }
 
-/* ============ PWA ============ */
+/* ===== PWA ===== */
 if("serviceWorker" in navigator){
  navigator.serviceWorker.register("service-worker.js").catch(()=>{});
 }
