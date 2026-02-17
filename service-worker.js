@@ -1,14 +1,14 @@
-const CACHE="neurosync-v2";
-const urls=["./","./index.html","./manifest.json"];
+const CACHE="neurosync-v3";
+const FILES=["./","./index.html","./manifest.json"];
 
 self.addEventListener("install",e=>{
  e.waitUntil(
-  caches.open(CACHE).then(cache=>cache.addAll(urls))
+  caches.open(CACHE).then(cache=>cache.addAll(FILES))
  );
 });
 
 self.addEventListener("fetch",e=>{
  e.respondWith(
-  caches.match(e.request).then(r=>r||fetch(e.request))
+  caches.match(e.request).then(res=>res||fetch(e.request))
  );
 });
